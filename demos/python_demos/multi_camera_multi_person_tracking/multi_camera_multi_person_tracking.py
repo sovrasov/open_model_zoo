@@ -17,6 +17,7 @@ import queue
 from threading import Thread
 import json
 import logging as log
+from collections import deque
 
 import cv2 as cv
 
@@ -80,46 +81,52 @@ def run(params, capture, detector, reid):
     else:
         output_video = None
 
-    prev_frames = thread_body.frames_queue.get()
-    detector.run_asynch(prev_frames, frame_number)
+    captured_frames = deque([], 2)
+    try:
+        frames = thread_body.frames_queue.get()
+        captured_frames.append(frames)
+    except queue.Empty:
+        print('Can\'t read the first frame from the source video stream')
+        return
 
-    while thread_body.process:
+    detector.run_asynch(captured_frames[-1], frame_number)
+
+    while thread_body.process or len(captured_frames) > 0:
         key = check_pressed_keys(key)
         if key == 27:
             break
         start = time.time()
         try:
             frames = thread_body.frames_queue.get_nowait()
+            captured_frames.append(frames)
         except queue.Empty:
             frames = None
 
-        if frames is None:
-            continue
-
         frame_number += 1
         all_detections = detector.wait_and_grab()
-        detector.run_asynch(frames, frame_number)
+        if len(captured_frames) > 1:
+            detector.run_asynch(captured_frames[-1], frame_number)
 
         all_masks = [[] for _ in range(len(all_detections))]
         for i, detections in enumerate(all_detections):
             all_detections[i] = [det[0] for det in detections]
             all_masks[i] = [det[2] for det in detections if len(det) == 3]
 
-        tracker.process(prev_frames, all_detections, all_masks)
+        tracker.process(captured_frames[0], all_detections, all_masks)
         tracked_objects = tracker.get_tracked_objects()
 
         latency = time.time() - start
         avg_latency.update(latency)
         fps = round(1. / latency, 1)
 
-        vis = visualize_multicam_detections(prev_frames, tracked_objects, fps, **config['visualization_config'])
+        vis = visualize_multicam_detections(captured_frames[0], tracked_objects, fps, **config['visualization_config'])
         cv.imshow(win_name, vis)
         if output_video:
             output_video.write(cv.resize(vis, video_output_size))
 
         print('\rProcessing frame: {}, fps = {} (avg_fps = {:.3})'.format(
                             frame_number, fps, 1. / avg_latency.get()), end="")
-        prev_frames, frames = frames, prev_frames
+        captured_frames.popleft()
     print('')
 
     thread_body.process = False
