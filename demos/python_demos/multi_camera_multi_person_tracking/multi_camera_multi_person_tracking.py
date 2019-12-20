@@ -52,6 +52,30 @@ class FramesThreadBody:
                 self.frames_queue.put(frames)
 
 
+def grab_reid_embeddings(reid_model, all_detections):
+    all_embeddings = []
+    unsplitted_embeddings = reid_model.wait_and_grab()
+
+    for detections in all_detections:
+        num_vecs = len(detections)
+        all_embeddings.append(unsplitted_embeddings[0:num_vecs])
+        unsplitted_embeddings = unsplitted_embeddings[num_vecs:]
+
+    return all_embeddings
+
+
+def run_reid_asynch(reid_model, all_detections, frames):
+    for j, detections in enumerate(all_detections):
+        rois = []
+        for i in range(len(detections)):
+            rect, conf = detections[i]
+            left, top, right, bottom = rect
+            rois.append(frames[j][top:bottom, left:right])
+
+        if rois:
+            reid_model.forward_async(rois)
+
+
 def run(params, capture, detector, reid):
     win_name = 'Multi camera tracking'
     frame_number = 0
@@ -81,15 +105,20 @@ def run(params, capture, detector, reid):
     else:
         output_video = None
 
-    captured_frames = deque([], 2)
+    captured_frames = deque([], 3)
+    prepared_detections = deque([], 2)
     try:
-        frames = thread_body.frames_queue.get()
-        captured_frames.append(frames)
+        captured_frames.append(thread_body.frames_queue.get())
+        captured_frames.append(thread_body.frames_queue.get())
     except queue.Empty:
         print('Can\'t read the first frame from the source video stream')
         return
 
-    detector.run_asynch(captured_frames[-1], frame_number)
+    detector.run_asynch(captured_frames[0], frame_number)
+    prepared_detections.append(detector.wait_and_grab())
+    frame_number += 1
+    detector.run_asynch(captured_frames[1], frame_number)
+    run_reid_asynch(reid, prepared_detections[0], captured_frames[0])
 
     while thread_body.process or len(captured_frames) > 0:
         key = check_pressed_keys(key)
@@ -106,8 +135,10 @@ def run(params, capture, detector, reid):
             continue
 
         frame_number += 1
-        all_detections = detector.wait_and_grab()
         if len(captured_frames) > 1:
+            prepared_detections.append(detector.wait_and_grab())
+        all_detections = prepared_detections.popleft()  # detector.wait_and_grab()
+        if len(captured_frames) > 2:
             detector.run_asynch(captured_frames[-1], frame_number)
 
         all_masks = [[] for _ in range(len(all_detections))]
@@ -115,20 +146,25 @@ def run(params, capture, detector, reid):
             all_detections[i] = [det[0] for det in detections]
             all_masks[i] = [det[2] for det in detections if len(det) == 3]
 
-        tracker.process(captured_frames[0], all_detections, all_masks)
+        all_embeddings = grab_reid_embeddings(reid, all_detections)
+        if len(prepared_detections) > 0:
+            run_reid_asynch(reid, prepared_detections[0], captured_frames[1])
+
+        tracker.process(captured_frames[0], all_detections, all_embeddings, all_masks)
         tracked_objects = tracker.get_tracked_objects()
 
         latency = time.time() - start
         avg_latency.update(latency)
         fps = round(1. / latency, 1)
 
-        vis = visualize_multicam_detections(captured_frames[0], tracked_objects, fps, **config['visualization_config'])
+        vis = visualize_multicam_detections(captured_frames[0], tracked_objects,
+                                            fps, **config['visualization_config'])
         cv.imshow(win_name, vis)
         if output_video:
             output_video.write(cv.resize(vis, video_output_size))
 
         print('\rProcessing frame: {}, fps = {} (avg_fps = {:.3})'.format(
-                            frame_number, fps, 1. / avg_latency.get()), end="")
+                            frame_number - 2, fps, 1. / avg_latency.get()), end="")
         captured_frames.popleft()
     print('')
 

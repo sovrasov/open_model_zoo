@@ -83,7 +83,8 @@ class Detector(DetectorInterface):
                     top = max(int(top - dh), 0)
                     bottom = int(bottom + dh)
 
-                detections.append(((left, top, right, bottom), confidence))
+                if left != right and top != bottom:
+                    detections.append(((left, top, right, bottom), confidence))
 
         if len(detections) > 1:
             detections.sort(key=lambda x: x[1], reverse=True)
@@ -126,10 +127,13 @@ class ReIDWithOrientationWrapper:
         self.orientation_classifier = orientation_classifier
         self.cl_threshold = cl_threshold
 
-    def forward(self, rois):
-        self.reid.forward_async(rois)
+    def forward_async(self, batch):
+        self.reid.forward_async(batch)
         if self.orientation_classifier is not None:
-            self.orientation_classifier.forward_async(rois)
+            self.orientation_classifier.forward_async(batch)
+
+    def wait_and_grab(self):
+        if self.orientation_classifier is not None:
             embeddings = self.reid.wait_and_grab()
             orientations = self.orientation_classifier.wait_and_grab()
             for i, vec in enumerate(orientations):
@@ -144,6 +148,10 @@ class ReIDWithOrientationWrapper:
                 embeddings[i] = ReidFeature(embeddings[i], -1)
 
         return embeddings
+
+    def forward(self, rois):
+        self.forward_async(rois)
+        return self.wait_and_grab()
 
 
 class MaskRCNN(DetectorInterface):

@@ -46,7 +46,7 @@ class MultiCameraTracker:
                                                  self._release_global_id,
                                                  reid_model, visual_analyze=visual_analyze, **sct_config))
 
-    def process(self, frames, all_detections, masks=None):
+    def process(self, frames, all_detections, all_embeddings, masks=None):
         assert len(frames) == len(all_detections) == len(self.scts)
         all_tracks = []
         for i, sct in enumerate(self.scts):
@@ -54,9 +54,9 @@ class MultiCameraTracker:
                 mask = masks[i]
             else:
                 mask = None
-            if self.bbox_min_aspect_ratio is not None:
-                all_detections[i] = self._filter_detections(all_detections[i])
-            sct.process(frames[i], all_detections[i], mask)
+            # if self.bbox_min_aspect_ratio is not None:
+            #     all_detections[i] = self._filter_detections(all_detections[i])
+            sct.process(frames[i], all_detections[i], all_embeddings[i], mask)
             all_tracks += sct.get_tracks()
 
         if self.time > 0 and self.time % self.time_window == 0:
