@@ -50,7 +50,7 @@ class IEModel:
         for id in self.reqs_ids:
             self.net.requests[id].wait(-1)
             res = self.net.requests[id].outputs[self.output_key]
-            outputs.append(np.copy(res))
+            outputs.append(res)
         self.reqs_ids = []
         return outputs
 

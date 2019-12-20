@@ -102,6 +102,9 @@ def run(params, capture, detector, reid):
         except queue.Empty:
             frames = None
 
+        if frames is None and thread_body.process:
+            continue
+
         frame_number += 1
         all_detections = detector.wait_and_grab()
         if len(captured_frames) > 1:

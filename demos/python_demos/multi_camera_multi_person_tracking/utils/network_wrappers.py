@@ -43,7 +43,7 @@ class Detector(DetectorInterface):
         self.max_num_frames = max_num_frames
 
     def run_asynch(self, frames, index):
-        assert len(frames) <= self.max_num_frames
+        assert 0 < len(frames) <= self.max_num_frames
         self.shapes = []
         for i in range(len(frames)):
             self.shapes.append(frames[i].shape)
