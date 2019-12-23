@@ -43,7 +43,6 @@ class MulticamCapture:
                 cap = cv.VideoCapture(video_path)
                 assert cap.isOpened()
                 self.captures.append(cap)
-        self.i = 0
 
     def add_transform(self, t):
         self.transforms.append(t)
@@ -57,10 +56,6 @@ class MulticamCapture:
                     frame = t(frame)
                 frames.append(frame)
 
-        if self.i >= 2000:
-            return False, None
-
-        self.i += 1
         return len(frames) == len(self.captures), frames
 
     def get_num_sources(self):
