@@ -12,8 +12,8 @@
 """
 
 import json
+import os
 import logging as log
-from collections import namedtuple
 from abc import ABC, abstractmethod
 
 import cv2
@@ -242,3 +242,26 @@ class DetectionsFromFileReader(DetectorInterface):
                         valid_detections.append((bbox, score))
             output.append(valid_detections)
         return output
+
+
+class MOTDetectionsReader(DetectorInterface):
+    def __init__(self, input_seq_path, score_thresh, half_mode=False):
+        self.score_thresh = score_thresh
+        self.detections = {}
+        log.info('Loading {}'.format(input_seq_path))
+
+        all_detections = []
+        with open(os.path.join(input_seq_path, 'det/det.txt')) as f:
+            all_detections = f.readlines()
+        for line in all_detections:
+            numbers = [int(float(x)) for x in line.split(',')]
+            frame, id, bb_left, bb_top, bb_width, bb_height, conf = numbers
+            if frame not in self.detections:
+                self.detections[frame] = []
+            self.detections[frame].append(([bb_left, bb_top, bb_left + bb_width, bb_top + bb_height], 1.))
+
+    def run_async(self, frames, index):
+        self.last_index = index
+
+    def wait_and_grab(self):
+        return [self.detections[self.last_index + 1]]

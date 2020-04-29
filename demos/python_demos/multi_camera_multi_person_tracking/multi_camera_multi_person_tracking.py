@@ -23,11 +23,11 @@ import sys
 
 import cv2 as cv
 
-from utils.network_wrappers import Detector, VectorCNN, MaskRCNN, DetectionsFromFileReader
+from utils.network_wrappers import Detector, VectorCNN, MaskRCNN, DetectionsFromFileReader, MOTDetectionsReader
 from mc_tracker.mct import MultiCameraTracker
 from utils.analyzer import save_embeddings
 from utils.misc import read_py_config, check_pressed_keys, AverageEstimator, set_log_config
-from utils.video import MulticamCapture, NormalizerCLAHE
+from utils.video import MulticamCapture, NormalizerCLAHE, MOTSeqReader
 from utils.visualization import visualize_multicam_detections, get_target_size
 from openvino.inference_engine import IECore  # pylint: disable=import-error,E0611
 
@@ -71,6 +71,10 @@ def save_json_file(save_path, data, description=''):
         log.info('{} saved to {}'.format(description, save_path))
 
 
+def save_mot_result(save_path, data):
+    pass
+
+
 class FramesThreadBody:
     def __init__(self, capture, max_queue_length=2):
         self.process = True
@@ -108,7 +112,7 @@ def run(params, config, capture, detector, reid):
     tracker = MultiCameraTracker(capture.get_num_sources(), reid, config['sct_config'], **config['mct_config'],
                                  visual_analyze=config['analyzer'])
 
-    thread_body = FramesThreadBody(capture, max_queue_length=len(capture.captures) * 2)
+    thread_body = FramesThreadBody(capture, max_queue_length=capture.get_num_sources() * 2)
     frames_thread = Thread(target=thread_body)
     frames_thread.start()
 
@@ -172,7 +176,13 @@ def run(params, config, capture, detector, reid):
     frames_thread.join()
 
     if len(params.history_file):
-        save_json_file(params.history_file, tracker.get_all_tracks_history(), description='History file')
+        if '.txt' in params.history_file:
+            save_mot_result(params.history_file, tracker.get_all_tracks_history())
+        elif '.txt' in params.history_file:
+            save_json_file(params.history_file, tracker.get_all_tracks_history(), description='History file')
+        else:
+            log.info('Wrong extension of the output file')
+
     if len(params.save_detections):
         save_json_file(params.save_detections, output_detections, description='Detections')
 
@@ -212,6 +222,8 @@ def main():
     parser.add_argument('--save_detections', type=str, default='', required=False,
                         help='Optional. Path to file in JSON format to save bounding boxes')
     parser.add_argument("--no_show", help="Optional. Don't show output", action='store_true')
+    parser.add_argument('--mot_eval', help='MOT17 evaluation mode', action='store_true')
+    parser.add_argument('--mot_half_mode', help='MOT17 evaluation half mode', action='store_true')
 
     parser.add_argument('-d', '--device', type=str, default='CPU')
     parser.add_argument('-l', '--cpu_extension',
@@ -231,21 +243,29 @@ def main():
         sys.exit(1)
 
     random.seed(config['random_seed'])
-    capture = MulticamCapture(args.i)
 
     log.info("Creating Inference Engine")
     ie = IECore()
 
-    if args.detections:
-        person_detector = DetectionsFromFileReader(args.detections, args.t_detector)
-    elif args.m_segmentation:
-        person_detector = MaskRCNN(ie, args.m_segmentation, args.t_segmentation,
-                                   args.device, args.cpu_extension,
-                                   capture.get_num_sources())
+    if args.mot_eval:
+        if args.detections:
+            person_detector = MOTDetectionsReader(args.detections, args.t_detector, args.mot_half_mode)
+        else:
+            person_detector = Detector(ie, args.m_detector, args.t_detector,
+                                       args.device, args.cpu_extension, 1)
+        capture = MOTSeqReader(args.i[0], args.mot_half_mode)
     else:
-        person_detector = Detector(ie, args.m_detector, args.t_detector,
-                                   args.device, args.cpu_extension,
-                                   capture.get_num_sources())
+        capture = MulticamCapture(args.i)
+        if args.detections:
+            person_detector = DetectionsFromFileReader(args.detections, args.t_detector)
+        elif args.m_segmentation:
+            person_detector = MaskRCNN(ie, args.m_segmentation, args.t_segmentation,
+                                       args.device, args.cpu_extension,
+                                       capture.get_num_sources())
+        else:
+            person_detector = Detector(ie, args.m_detector, args.t_detector,
+                                       args.device, args.cpu_extension,
+                                       capture.get_num_sources())
 
     if args.m_reid:
         person_recognizer = VectorCNN(ie, args.m_reid, args.device, args.cpu_extension)

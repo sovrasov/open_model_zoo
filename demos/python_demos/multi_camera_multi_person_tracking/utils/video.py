@@ -12,6 +12,8 @@
 """
 
 import logging as log
+import glob
+import os
 import cv2 as cv
 
 
@@ -69,6 +71,29 @@ class MulticamCapture:
                                int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))))
             fps.append(int(cap.get(cv.CAP_PROP_FPS)))
         return frame_size, fps
+
+
+class MOTSeqReader:
+    def __init__(self, seq_root, half_mode=False):
+        self.img_paths = sorted(glob.glob(os.path.join(seq_root, '*.jpg')))
+        self.next_frame_idx = 0
+        test_img = cv.imread(self.img_paths[self.next_frame_idx])
+        self.input_shape = test_img.shape
+        print(self.input_shape)
+
+    def get_frames(self):
+        if self.next_frame_idx < len(self.img_paths):
+            img = cv.imread(self.img_paths[self.next_frame_idx])
+            self.next_frame_idx += 1
+            return True, [img]
+        else:
+            return False, []
+
+    def get_num_sources(self):
+        return 1
+
+    def get_source_parameters(self):
+        return [self.input_shape[1], self.input_shape[0]], 30
 
 
 class NormalizerCLAHE:
