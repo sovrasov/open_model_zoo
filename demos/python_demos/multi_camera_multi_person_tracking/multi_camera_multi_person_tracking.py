@@ -71,10 +71,6 @@ def save_json_file(save_path, data, description=''):
         log.info('{} saved to {}'.format(description, save_path))
 
 
-def save_mot_result(save_path, data):
-    pass
-
-
 class FramesThreadBody:
     def __init__(self, capture, max_queue_length=2):
         self.process = True
@@ -176,12 +172,7 @@ def run(params, config, capture, detector, reid):
     frames_thread.join()
 
     if len(params.history_file):
-        if '.txt' in params.history_file:
-            save_mot_result(params.history_file, tracker.get_all_tracks_history())
-        elif '.txt' in params.history_file:
-            save_json_file(params.history_file, tracker.get_all_tracks_history(), description='History file')
-        else:
-            log.info('Wrong extension of the output file')
+        save_json_file(params.history_file, tracker.get_all_tracks_history(), description='History file')
 
     if len(params.save_detections):
         save_json_file(params.save_detections, output_detections, description='Detections')
