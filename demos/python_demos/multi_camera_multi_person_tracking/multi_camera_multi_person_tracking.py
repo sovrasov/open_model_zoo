@@ -23,7 +23,7 @@ import sys
 
 import cv2 as cv
 
-from utils.network_wrappers import Detector, VectorCNN, MaskRCNN, DetectionsFromFileReader, MOTDetectionsReader
+from utils.network_wrappers import Detector, VectorCNN, MaskRCNN, DetectionsFromFileReader, MOTDetectionsReader, FairMOTWrapper
 from mc_tracker.mct import MultiCameraTracker
 from utils.analyzer import save_embeddings
 from utils.misc import read_py_config, check_pressed_keys, AverageEstimator, set_log_config
@@ -239,11 +239,7 @@ def main():
     ie = IECore()
 
     if args.mot_eval:
-        if args.detections:
-            person_detector = MOTDetectionsReader(args.detections, args.t_detector, args.mot_half_mode)
-        else:
-            person_detector = Detector(ie, args.m_detector, args.t_detector,
-                                       args.device, args.cpu_extension, 1)
+        person_detector = FairMOTWrapper(args.m_detector, args.t_detector)
         capture = MOTSeqReader(args.i[0], args.mot_half_mode)
     else:
         capture = MulticamCapture(args.i)

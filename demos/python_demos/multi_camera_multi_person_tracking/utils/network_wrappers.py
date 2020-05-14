@@ -265,3 +265,137 @@ class MOTDetectionsReader(DetectorInterface):
 
     def wait_and_grab(self):
         return [self.detections[self.last_index + 1]]
+
+
+# for FAIRMOT
+import sys
+sys.path.append('/home/sovrasov/repositories/FairMOT/src/')
+print(sys.path)
+from lib.models.decode import mot_decode
+from lib.models.model import create_model, load_model
+from lib.models.utils import _tranpose_and_gather_feat
+from lib.utils.post_process import ctdet_post_process
+import torch
+import torch.nn.functional as F
+
+
+def letterbox(img, height=608, width=1088,
+              color=(127.5, 127.5, 127.5)):  # resize a rectangular image to a padded rectangular
+    shape = img.shape[:2]  # shape = [height, width]
+    ratio = min(float(height) / shape[0], float(width) / shape[1])
+    new_shape = (round(shape[1] * ratio), round(shape[0] * ratio))  # new_shape = [width, height]
+    dw = (width - new_shape[0]) / 2  # width padding
+    dh = (height - new_shape[1]) / 2  # height padding
+    top, bottom = round(dh - 0.1), round(dh + 0.1)
+    left, right = round(dw - 0.1), round(dw + 0.1)
+    img = cv2.resize(img, new_shape, interpolation=cv2.INTER_AREA)  # resized, no border
+    img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # padded rectangular
+    return img, ratio, dw, dh
+
+
+class FairMOTWrapper(DetectorInterface):
+    def __init__(self, weights_path, score_thresh):
+        self.score_thresh = score_thresh
+        self.arch = 'dla_34'
+        self.num_classes = 1
+        self.cat_spec_wh = False
+        self.reid_dim = 512
+        self.K = 128
+        self.down_ratio = 4
+        self.reg_offset = True
+        self.heads = {'hm': self.num_classes,
+                      'wh': 2,
+                      'id': self.reid_dim,
+                      'reg': 2}
+        self.head_conv = 256
+        self.model = create_model(self.arch, self.heads, self.head_conv)
+        self.model = load_model(self.model, weights_path)
+        self.model = self.model.to(0)
+        self.model.eval()
+        self.width = 1088
+        self.height = 608
+
+    def _post_process(self, dets, meta):
+        dets = dets.detach().cpu().numpy()
+        dets = dets.reshape(1, -1, dets.shape[2])
+        dets = ctdet_post_process(
+            dets.copy(), [meta['c']], [meta['s']],
+            meta['out_height'], meta['out_width'], self.num_classes)
+        for j in range(1, self.num_classes + 1):
+            dets[0][j] = np.array(dets[0][j], dtype=np.float32).reshape(-1, 5)
+        return dets[0]
+
+    def _pre_process_img(self, img0):
+        img, _, _, _ = letterbox(img0, height=self.height, width=self.width)
+        img = img[:, :, ::-1].transpose(2, 0, 1)
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        img /= 255.0
+        return torch.from_numpy(img).cuda().unsqueeze(0), img0
+
+    def _merge_outputs(self, detections):
+        results = {}
+        for j in range(1, self.num_classes + 1):
+            results[j] = np.concatenate(
+                [detection[j] for detection in detections], axis=0).astype(np.float32)
+
+        scores = np.hstack(
+            [results[j][:, 4] for j in range(1, self.num_classes + 1)])
+        if len(scores) > self.K:
+            kth = len(scores) - self.K
+            thresh = np.partition(scores, kth)[kth]
+            for j in range(1, self.num_classes + 1):
+                keep_inds = (results[j][:, 4] >= thresh)
+                results[j] = results[j][keep_inds]
+        return results
+
+    def run_async(self, frames, index):
+        im_blob, img0 = self._pre_process_img(frames[0])
+        width = img0.shape[1]
+        height = img0.shape[0]
+        inp_height = im_blob.shape[2]
+        inp_width = im_blob.shape[3]
+        c = np.array([width / 2., height / 2.], dtype=np.float32)
+        s = max(float(inp_width) / float(inp_height) * height, width) * 1.0
+        meta = {'c': c, 's': s,
+                'out_height': inp_height // self.down_ratio,
+                'out_width': inp_width // self.down_ratio}
+
+        ''' Step 1: Network forward, get detections & embeddings'''
+        with torch.no_grad():
+            output = self.model(im_blob)[-1]
+            hm = output['hm'].sigmoid_()
+            wh = output['wh']
+            id_feature = output['id']
+            id_feature = F.normalize(id_feature, dim=1)
+
+            reg = output['reg'] if self.reg_offset else None
+            dets, inds = mot_decode(hm, wh, reg=reg, cat_spec_wh=self.cat_spec_wh, K=self.K)
+            id_feature = _tranpose_and_gather_feat(id_feature, inds)
+            id_feature = id_feature.squeeze(0)
+            id_feature = id_feature.cpu().numpy()
+
+        dets = self._post_process(dets, meta)
+        dets = self._merge_outputs([dets])[1]
+
+        remain_inds = dets[:, 4] > self.score_thresh
+        self.dets = []
+        self.id_feature = id_feature[remain_inds]
+        for det in dets[remain_inds]:
+            det = [int(d) for d in det]
+            self.dets.append((det[0:4], 1.))
+
+
+        # vis
+        '''
+        for i in range(0, dets.shape[0]):
+            bbox = dets[i][0:4]
+            cv2.rectangle(img0, (bbox[0], bbox[1]),
+                          (bbox[2], bbox[3]),
+                          (0, 255, 0), 2)
+        cv2.imshow('dets', img0)
+        cv2.waitKey(0)
+        id0 = id0-1
+        '''
+
+    def wait_and_grab(self):
+        return [self.dets]
