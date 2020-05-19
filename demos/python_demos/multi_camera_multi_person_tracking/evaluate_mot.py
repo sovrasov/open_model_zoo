@@ -27,50 +27,54 @@ from utils.misc import set_log_config
 set_log_config()
 
 
-def read_txt(file_names, camera_tracks):
-    frame_nums = []
-    for j, file_name in enumerate(file_names):
-        with open(file_name, 'r') as f:
-            gt_lines = f.readlines()
-        with open(osp.join(osp.abspath(osp.dirname(file_name)), '../seqinfo.ini'), 'r') as f:
+def read_txt(file_name):
+    camera_tracks = []
+    with open(file_name, 'r') as f:
+        gt_lines = f.readlines()
+    meta_file = osp.join(osp.abspath(osp.dirname(file_name)), '../seqinfo.ini')
+    if osp.isfile(meta_file):
+        with open(meta_file, 'r') as f:
             meta = f.readlines()
-            params = {}
-            for l in meta:
-                l = l.split('=')
-                if len(l) > 1:
-                    params[l[0]] = l[1].replace('\n', '')
-            width, height = int(params['imWidth']), int(params['imHeight'])
-        last_frame_num = 0
-        for l in gt_lines:
-            l = l.split(',')
-            frame_num = int(l[0]) - 1
-            pid = int(l[1])
-            x0, y0, w, h = int(float(l[2])), int(float(l[3])), int(float(l[4])), int(float(l[5]))
-            x0, y0 = max(x0, 0), max(y0, 0)
-            x1, y1 = min(x0 + w, width - 1), min(y0 + h, height - 1)
-            conf = float(l[6])
-            pid_found = False
-            for i in range(len(camera_tracks[j])):
-                if camera_tracks[j][i]['id'] == pid:
-                    camera_tracks[j][i]['boxes'].append([x0, y0, x1, y1])
-                    camera_tracks[j][i]['timestamps'].append(frame_num)
-                    pid_found = True
-                    break
-            if not pid_found:
-                camera_tracks[j].append({'id': pid, 'boxes': [[x0, y0, x1, y1]], 'timestamps': [frame_num]})
-            last_frame_num = max(last_frame_num, frame_num)
-        frame_nums.append(last_frame_num)
-    return camera_tracks, frame_nums
+        params = {}
+        for l in meta:
+            l = l.split('=')
+            if len(l) > 1:
+                params[l[0]] = l[1].replace('\n', '')
+        width, height = int(params['imWidth']), int(params['imHeight'])
+    else:
+        width, height = None, None
+    last_frame_num = 0
+    for l in gt_lines:
+        l = l.split(',')
+        frame_num = int(l[0]) - 1
+        pid = int(l[1])
+        x0, y0, w, h = int(float(l[2])), int(float(l[3])), int(float(l[4])), int(float(l[5]))
+        x0, y0 = max(x0, 0), max(y0, 0)
+        x1, y1 = x0 + w, y0 + h
+        if width is not None and height is not None:
+            x1, y1 = min(x1, width - 1), min(y1, height - 1)
+        conf = float(l[6])
+        pid_found = False
+        for i in range(len(camera_tracks)):
+            if camera_tracks[i]['id'] == pid:
+                camera_tracks[i]['boxes'].append([x0, y0, x1, y1])
+                camera_tracks[i]['timestamps'].append(frame_num)
+                pid_found = True
+                break
+        if not pid_found:
+            camera_tracks.append({'id': pid, 'boxes': [[x0, y0, x1, y1]], 'timestamps': [frame_num]})
+    last_frame_num = max(last_frame_num, frame_num)
+    return camera_tracks, last_frame_num
 
 
 def read_gt_tracks(gt_filenames, size_divisor=1, skip_frames=0, skip_heavy_occluded_objects=False):
-    frame_nums = []
-    min_last_frame_idx = -1
     camera_tracks = [[] for _ in gt_filenames]
-    if gt_filenames[0].endswith('.txt'):
-        return read_txt(gt_filenames, camera_tracks)
+    frame_nums = [[] for _ in gt_filenames]
     for i, filename in enumerate(gt_filenames):
-        last_frame_idx = -1
+        if gt_filenames[0].endswith('.txt'):
+            camera_tracks[i], frame_nums[i] = read_txt(filename)
+            continue
+        last_frame_idx = 0
         tree = etree.parse(filename)
         root = tree.getroot()
         for track_xml_subtree in tqdm(root, desc='Reading ' + filename):
@@ -95,31 +99,17 @@ def read_gt_tracks(gt_filenames, size_divisor=1, skip_frames=0, skip_heavy_occlu
                 id = [int(tag.text) for tag in box_tree if tag.attrib['name'] == 'id'][0]
             track['id'] = id
             camera_tracks[i].append(track)
-        if min_last_frame_idx < 0:
-            min_last_frame_idx = last_frame_idx
-        else:
-            min_last_frame_idx = min(min_last_frame_idx, last_frame_idx)
-        frame_nums.append(min_last_frame_idx)
-
+        frame_nums[i] = last_frame_idx
     return camera_tracks, frame_nums
 
 
 def get_detections_from_tracks(tracks_history, time):
     active_detections = []
-    for track in tracks_history: #camera_hist:
+    for track in tracks_history:
         if time in track['timestamps']:
             idx = track['timestamps'].index(time)
             active_detections.append(TrackedObj(track['boxes'][idx], track['id']))
     return active_detections
-
-
-def check_contain_duplicates(all_detections):
-    for detections in all_detections:
-        all_labels = [obj.label for obj in detections]
-        uniq = set(all_labels)
-        if len(all_labels) != len(uniq):
-            return True
-    return False
 
 
 def main():
