@@ -139,6 +139,10 @@ def run(params, config, capture, detector, reid):
             continue
 
         all_detections = detector.wait_and_grab()
+        if reid is None:
+            features = detector.get_embeddings()
+        else:
+            features = None
         if params.save_detections:
             update_detections(output_detections, all_detections, frame_number)
         frame_number += 1
@@ -149,7 +153,8 @@ def run(params, config, capture, detector, reid):
             all_detections[i] = [det[0] for det in detections]
             all_masks[i] = [det[2] for det in detections if len(det) == 3]
 
-        tracker.process(prev_frames, all_detections, all_masks)
+        tracker.process(prev_frames, all_detections, all_masks, ext_reid_features=features)
+
         tracked_objects = tracker.get_tracked_objects()
 
         latency = time.time() - start
@@ -203,7 +208,7 @@ def main():
     parser.add_argument('--t_segmentation', type=float, default=0.6,
                         help='Threshold for person instance segmentation model')
 
-    parser.add_argument('--m_reid', type=str, required=True,
+    parser.add_argument('--m_reid', type=str, required=False,
                         help='Path to the person re-identification model')
 
     parser.add_argument('--output_video', type=str, default='', required=False,

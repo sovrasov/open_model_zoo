@@ -262,10 +262,12 @@ class SingleCameraTracker:
         if visual_analyze is not None and 'enable' in visual_analyze and visual_analyze['enable']:
             self.analyzer = Analyzer(self.id, **visual_analyze)
 
-    def process(self, frame, detections, mask=None):
+    def process(self, frame, detections, mask=None, ext_reid_features=None):
         reid_features = [None]*len(detections)
         if self.reid_model:
             reid_features = self._get_embeddings(frame, detections, mask)
+        elif ext_reid_features is not None:
+            reid_features = ext_reid_features
 
         assignment = self._continue_tracks(detections, reid_features)
         self._create_new_tracks(detections, reid_features, assignment)

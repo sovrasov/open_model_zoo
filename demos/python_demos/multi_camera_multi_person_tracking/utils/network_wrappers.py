@@ -269,6 +269,7 @@ class MOTDetectionsReader(DetectorInterface):
 
 # for FAIRMOT
 import sys
+from copy import copy, deepcopy
 sys.path.append('/home/sovrasov/repositories/FairMOT/src/')
 print(sys.path)
 from lib.models.decode import mot_decode
@@ -379,23 +380,26 @@ class FairMOTWrapper(DetectorInterface):
 
         remain_inds = dets[:, 4] > self.score_thresh
         self.dets = []
-        self.id_feature = id_feature[remain_inds]
-        for det in dets[remain_inds]:
-            det = [int(d) for d in det]
-            self.dets.append((det[0:4], 1.))
-
-
-        # vis
-        '''
-        for i in range(0, dets.shape[0]):
-            bbox = dets[i][0:4]
-            cv2.rectangle(img0, (bbox[0], bbox[1]),
-                          (bbox[2], bbox[3]),
-                          (0, 255, 0), 2)
-        cv2.imshow('dets', img0)
-        cv2.waitKey(0)
-        id0 = id0-1
-        '''
+        self.id_feature = []
+        id_feature = id_feature[remain_inds]
+        for i, det in enumerate(dets[remain_inds]):
+            det = [int(d) for d in det[0:4]]
+            #h = det[2] - det[0]
+            #w = det[3] - det[1]
+            left, top, right, bottom = det
+            crop = img0[top:bottom, left:right]
+            if crop.shape[0] > 3 and crop.shape[1] > 3:
+                self.dets.append((det, 1.))
+                self.id_feature.append(id_feature[i])
+            else:
+                print('Skip box!')
 
     def wait_and_grab(self):
-        return [self.dets]
+        for det in self.dets:
+            h = det[0][2] - det[0][0]
+            w = det[0][3] - det[0][1]
+            print(w, h)
+        return [copy(self.dets)]
+
+    def get_embeddings(self):
+        return [deepcopy(self.id_feature)]
