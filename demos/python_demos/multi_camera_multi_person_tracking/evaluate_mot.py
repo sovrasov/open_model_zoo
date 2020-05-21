@@ -70,14 +70,14 @@ def read_txt(file_name):
 def read_gt_tracks(gt_filenames, size_divisor=1, skip_frames=0, skip_heavy_occluded_objects=False):
     camera_tracks = [[] for _ in gt_filenames]
     frame_nums = [[] for _ in gt_filenames]
-    for i, filename in enumerate(gt_filenames):
-        if gt_filenames[0].endswith('.txt'):
+    for i, filename in tqdm(enumerate(gt_filenames), 'Reading ground truth...'):
+        if filename.endswith('.txt'):
             camera_tracks[i], frame_nums[i] = read_txt(filename)
             continue
         last_frame_idx = 0
         tree = etree.parse(filename)
         root = tree.getroot()
-        for track_xml_subtree in tqdm(root, desc='Reading ' + filename):
+        for track_xml_subtree in root:
             if track_xml_subtree.tag != 'track':
                 continue
             track = {'id': None, 'boxes': [], 'timestamps': []}
@@ -131,6 +131,7 @@ def main():
                                                size_divisor=args.size_divisor,
                                                skip_frames=args.skip_frames)
     accs = [mm.MOTAccumulator(auto_id=True) for _ in args.gt_files]
+    names = [osp.basename(name).split('.')[0] for name in args.history_file]
 
     for n in tqdm(range(len(gt_tracks)), 'Processing detections'):
         if args.history_file[n].endswith('.json'):
@@ -169,7 +170,7 @@ def main():
     summary = mh.compute_many(accs,
                               metrics=mm.metrics.motchallenge_metrics,
                               generate_overall=True,
-                              names=['video ' + str(i) for i in range(len(accs))])
+                              names=names)#['video ' + str(i) for i in range(len(accs))])
 
     strsummary = mm.io.render_summary(summary,
                                       formatters=mh.formatters,
