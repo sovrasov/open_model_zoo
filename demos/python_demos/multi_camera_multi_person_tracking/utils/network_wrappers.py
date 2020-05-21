@@ -220,13 +220,34 @@ class DetectionsFromFileReader(DetectorInterface):
         self.score_thresh = score_thresh
         self.detections = []
         log.info('Loading {}'.format(input_file))
-        with open(input_file) as f:
-            all_detections = json.load(f)
-        for source_detections in all_detections:
+        if input_file.endswith('.json'):
+            with open(input_file) as f:
+                all_detections = json.load(f)
+            for source_detections in all_detections:
+                detections_dict = {}
+                for det in source_detections:
+                    detections_dict[det['frame_id']] = {'boxes': det['boxes'], 'scores': det['scores']}
+                self.detections.append(detections_dict)
+        elif input_file.endswith('.txt'):
+            with open(input_file) as f:
+                all_detections = f.readlines()
             detections_dict = {}
-            for det in source_detections:
-                detections_dict[det['frame_id']] = {'boxes': det['boxes'], 'scores': det['scores']}
+            for det in all_detections:
+                det = det.split(',')
+                frame_id = int(det[0]) - 1
+                pid = int(det[1])
+                x0, y0, w, h = int(float(det[2])), int(float(det[3])), int(float(det[4])), int(float(det[5]))
+                x0, y0 = max(x0, 0), max(y0, 0)
+                x1, y1 = x0 + w, y0 + h
+                conf = float(det[6])
+                if frame_id in detections_dict.keys():
+                    detections_dict[frame_id]['boxes'].append([x0, y0, x1, y1])
+                    detections_dict[frame_id]['scores'].append(conf)
+                else:
+                    detections_dict[frame_id] = {'boxes': [[x0, y0, x1, y1]], 'scores': [conf]}
             self.detections.append(detections_dict)
+        else:
+            raise ValueError('Unexpected format of file: {}'.format(input_file))
 
     def run_async(self, frames, index):
         self.last_index = index
