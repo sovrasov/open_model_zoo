@@ -27,7 +27,7 @@ from utils.misc import set_log_config
 set_log_config()
 
 
-def read_txt(file_name):
+def read_txt(file_name, min_conf=0.5):
     camera_tracks = []
     with open(file_name, 'r') as f:
         gt_lines = f.readlines()
@@ -54,6 +54,8 @@ def read_txt(file_name):
         if width is not None and height is not None:
             x1, y1 = min(x1, width - 1), min(y1, height - 1)
         conf = float(l[6])
+        if conf > 0 and conf < min_conf:
+            continue
         pid_found = False
         for i in range(len(camera_tracks)):
             if camera_tracks[i]['id'] == pid:

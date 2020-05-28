@@ -25,6 +25,7 @@ from run_evaluate import read_gt_tracks, get_detections_from_tracks
 from utils.misc import check_pressed_keys, set_log_config
 from utils.video import MulticamCapture
 from utils.visualization import visualize_multicam_detections, plot_timeline, get_target_size
+from evaluate_mot import read_txt
 
 set_log_config()
 
@@ -135,8 +136,12 @@ def main():
     args = parser.parse_args()
 
     capture = MulticamCapture(args.i)
-    with open(args.history_file) as hist_f:
-        history = json.load(hist_f)
+    if args.history_file.endswith('.json'):
+        with open(args.history_file) as hist_f:
+            history = json.load(hist_f)
+    elif args.history_file.endswith('.txt'):
+        history, _ = read_txt(args.history_file)
+        history = [history]
 
     assert len(history) == capture.get_num_sources()
 
